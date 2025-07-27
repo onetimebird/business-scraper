@@ -27,29 +27,48 @@ headers = {
 EMAIL_REGEX = r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
 PHONE_REGEX = r"(\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4})"
 FREE_EMAIL_DOMAINS = ['gmail.com', 'yahoo.com', 'hotmail.com', 'aol.com', 'outlook.com']
+SKIP_DOMAINS = ['yellowpages.ca', 'google.com', 'maps.google.com', 'facebook.com', 'twitter.com', 'instagram.com', 'linkedin.com', 'youtube.com']
 
 @st.cache_data(show_spinner=False)
 def get_search_results(query, location, limit):
     """
-    Use YellowPages to find business listing pages.
-    Returns a list of YellowPages business URLs.
+    Scrape YellowPages search for business listings, then extract each business's official website URL.
+    Returns a list of external business site URLs.
     """
-    results = []
     base_url = "https://www.yellowpages.ca"
     search_url = f"{base_url}/search/si/1/{query.replace(' ', '+')}/{location.replace(' ', '+')}"
+    results = []
     try:
         resp = requests.get(search_url, headers=headers, timeout=10)
         soup = BeautifulSoup(resp.text, "html.parser")
-        # Find listing links
-        for a in soup.find_all('a', class_='listing__name--link', href=True):
+        # Find listing page links
+        listing_links = [a['href'] for a in soup.find_all('a', class_='listing__name--link', href=True)]
+        listing_links = list(dict.fromkeys(listing_links))[:limit]
+
+        # For each listing, fetch the page and extract external website
+        for href in listing_links:
             if len(results) >= limit:
                 break
-            href = a['href']
-            full_url = urljoin(base_url, href)
-            results.append(full_url)
-    except Exception:
+            listing_url = urljoin(base_url, href)
+            try:
+                page = requests.get(listing_url, headers=headers, timeout=10)
+                page_soup = BeautifulSoup(page.text, "html.parser")
+                # Find all external links
+                external = []
+                for a in page_soup.find_all('a', href=True):
+                    link = a['href']
+                    if link.startswith('http'):
+                        domain = urlparse(link).netloc.lower()
+                        if not any(skip in domain for skip in SKIP_DOMAINS):
+                            external.append(link.split('?')[0])
+                external = list(dict.fromkeys(external))
+                if external:
+                    results.append(external[0])
+            except:
+                continue
+    except:
         pass
-    return list(dict.fromkeys(results))
+    return results
 
 
 def get_contact_pages(soup, base_url):
@@ -95,8 +114,9 @@ def extract_info_from_site(url):
     except:
         return None
 
+
 if run_scrape and query and location:
-    with st.spinner("Crawling YellowPages listings, then websites — please wait..."):
+    with st.spinner("Crawling YellowPages, extracting business sites and then contact info — please wait..."):
         biz_urls = get_search_results(query, location, num_sites)
         results = []
         for site in biz_urls:
