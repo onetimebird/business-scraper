@@ -6,13 +6,14 @@ from urllib.parse import urljoin
 from time import sleep
 import random
 from yelpapi import YelpAPI
+import re
 
 # Streamlit app configuration
 st.set_page_config(page_title="Canadian Business Listing Aggregator", layout="wide")
 
 st.title("🇨🇦 Comprehensive Business Listing Aggregator")
 st.markdown(
-    "Aggregate Canadian business listings using the Yelp API, YellowPages, and Bing for a de-duplicated list."
+    "Aggregate Canadian business listings using the Yelp API, YellowPages, and Bing for a de-duplicated list, now including each business's website URL."
 )
 
 # Configuration: hardcode your Yelp API Key here
@@ -48,9 +49,23 @@ def fetch_yelp_api(term, loc, limit):
         response = yelp.search_query(term=term, location=loc, limit=min(limit,50))
         for biz in response.get('businesses', []):
             name = biz.get('name', '')
-            url = biz.get('url', '')
-            if url:
-                listings.append({"Business Name": name, "Listing URL": url})
+            yelp_url = biz.get('url', '')
+            website_url = ''
+            # scrape Yelp page for business website link
+            try:
+                r = requests.get(yelp_url, headers=headers, timeout=5)
+                s = BeautifulSoup(r.text, 'html.parser')
+                link = s.find('a', href=True, string=re.compile('website', re.I))
+                if link:
+                    website_url = link['href']
+            except:
+                pass
+            listings.append({
+                "Business Name": name,
+                "Yelp URL": yelp_url,
+                "Business Website": website_url
+            })
+            sleep(random.uniform(0.1, 0.3))
     except Exception as e:
         st.error(f"Yelp API error: {e}")
     return listings
@@ -67,9 +82,23 @@ def fetch_yellowpages(term, loc, limit):
         tags = soup.find_all("a", class_="listing__name--link", href=True)
         for tag in tags[:limit]:
             name = tag.get_text(strip=True)
-            url = urljoin(base, tag['href'])
-            results.append({"Business Name": name, "Listing URL": url})
-            sleep(random.uniform(0.2, 0.5))
+            listing_url = urljoin(base, tag['href'])
+            website_url = ''
+            # scrape YellowPages page for business website button
+            try:
+                p = requests.get(listing_url, headers=headers, timeout=5)
+                sp = BeautifulSoup(p.text, 'html.parser')
+                btn = sp.find('a', href=True, string=re.compile('website', re.I))
+                if btn:
+                    website_url = btn['href']
+            except:
+                pass
+            results.append({
+                "Business Name": name,
+                "Listing URL": listing_url,
+                "Business Website": website_url
+            })
+            sleep(random.uniform(0.1, 0.3))
     except Exception as e:
         st.error(f"YellowPages scraping error: {e}")
     return results
@@ -90,8 +119,13 @@ def fetch_bing_scrape(term, loc, limit):
             a = h2.find("a", href=True)
             if a and ".ca" in a['href']:
                 name = a.get_text(strip=True)
-                results.append({"Business Name": name, "Listing URL": a['href']})
-                sleep(random.uniform(0.2, 0.5))
+                url = a['href']
+                # assume Bing link is the actual business website
+                results.append({
+                    "Business Name": name,
+                    "Business Website": url
+                })
+                sleep(random.uniform(0.1, 0.3))
     except Exception as e:
         st.error(f"Bing scraping error: {e}")
     return results
@@ -100,31 +134,26 @@ def fetch_bing_scrape(term, loc, limit):
 def aggregate_listings(term, loc, total):
     combined = []
     seen = set()
-    # Yelp API
     if loc:
-        yelp_list = fetch_yelp_api(term, loc, total)
-        for item in yelp_list:
-            url = item['Listing URL']
+        # Yelp API
+        for item in fetch_yelp_api(term, loc, total):
+            url = item['Business Website'] or item['Yelp URL']
             if url and url not in seen:
                 seen.add(url)
                 combined.append(item)
             if len(combined) >= total:
                 return combined
-    # YellowPages fallback
-    if loc:
-        yp_list = fetch_yellowpages(term, loc, total * 2)
-        for item in yp_list:
-            url = item['Listing URL']
+        # YellowPages fallback
+        for item in fetch_yellowpages(term, loc, total*2):
+            url = item['Business Website'] or item['Listing URL']
             if url and url not in seen:
                 seen.add(url)
                 combined.append(item)
             if len(combined) >= total:
                 return combined
-    # Bing fallback
-    if loc:
-        bing_list = fetch_bing_scrape(term, loc, total * 2)
-        for item in bing_list:
-            url = item['Listing URL']
+        # Bing fallback
+        for item in fetch_bing_scrape(term, loc, total*2):
+            url = item['Business Website']
             if url and url not in seen:
                 seen.add(url)
                 combined.append(item)
@@ -134,7 +163,6 @@ def aggregate_listings(term, loc, total):
 
 @st.cache_data(show_spinner=False)
 def aggregate_canada_wide(term, total):
-    """Use only Yelp API for Canada-wide searches for speed."""
     major_cities = [
         "Toronto ON", "Montreal QC", "Vancouver BC",
         "Calgary AB", "Edmonton AB", "Ottawa ON",
@@ -144,21 +172,18 @@ def aggregate_canada_wide(term, total):
     combined = []
     seen = set()
     for city in major_cities:
-        # Fetch only from Yelp API to keep it fast
-        yelp_list = fetch_yelp_api(term, city, total)
-        for item in yelp_list:
-            url = item['Listing URL']
+        for item in fetch_yelp_api(term, city, total):
+            url = item['Business Website'] or item['Yelp URL']
             if url and url not in seen:
                 seen.add(url)
                 combined.append(item)
     return combined
 
-# Run on button click
 if run:
     if not term or (not canada_wide and not loc):
         st.warning("Please enter both a business type and a location (or select Canada-wide).")
     else:
-        with st.spinner("Gathering listings..."):
+        with st.spinner("Gathering listings with website URLs..."):
             if canada_wide:
                 data = aggregate_canada_wide(term, count)
             else:
