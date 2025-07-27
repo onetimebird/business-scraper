@@ -6,14 +6,13 @@ from urllib.parse import urljoin
 from time import sleep
 import random
 from yelpapi import YelpAPI
-import googlemaps
 
 # Streamlit app configuration
 st.set_page_config(page_title="Canadian Business Listing Aggregator", layout="wide")
 
 st.title("🇨🇦 Comprehensive Business Listing Aggregator")
 st.markdown(
-    "Aggregate Canadian business listings using the Yelp API, Google Places API, YellowPages, and Bing for a comprehensive, de-duplicated list."
+    "Aggregate Canadian business listings using the Yelp API, YellowPages, and Bing for a de-duplicated list without requiring Google API keys."
 )
 
 # User inputs
@@ -21,7 +20,6 @@ term = st.text_input("Business type or keywords (e.g. dentist, marketing agency)
 loc = st.text_input("City or province (e.g. Toronto, Alberta)")
 count = st.slider("Number of businesses to list", min_value=10, max_value=500, value=100)
 yelp_api_key = st.text_input("Yelp API Key", type="password")
-google_api_key = st.text_input("Google API Key", type="password")
 use_bing = st.checkbox("Include Bing scraping fallback", value=True)
 run = st.button("🚀 Generate Listings")
 
@@ -40,30 +38,6 @@ def fetch_yelp_api(term, loc, limit):
                 listings.append({"Business Name": name, "Listing URL": url})
     except Exception as e:
         st.error(f"Yelp API error: {e}")
-    return listings
-
-@st.cache_data(show_spinner=False)
-def fetch_google_api(term, loc, limit):
-    listings = []
-    try:
-        gmaps = googlemaps.Client(key=google_api_key)
-        # Geocode the location
-        geocode_result = gmaps.geocode(loc)
-        if geocode_result:
-            coords = geocode_result[0]['geometry']['location']
-            places = gmaps.places_nearby(
-                location=(coords['lat'], coords['lng']),
-                keyword=term,
-                rank_by='distance'
-            )
-            for place in places.get('results', [])[:limit]:
-                name = place.get('name')
-                pid = place.get('place_id')
-                details = gmaps.place(place_id=pid, fields=['website'])
-                url = details.get('result', {}).get('website', '')
-                listings.append({"Business Name": name, "Listing URL": url})
-    except Exception as e:
-        st.error(f"Google Places API error: {e}")
     return listings
 
 @st.cache_data(show_spinner=False)
@@ -86,10 +60,10 @@ def fetch_yellowpages(term, loc, limit):
 
 @st.cache_data(show_spinner=False)
 def fetch_bing_scrape(term, loc, limit):
-    search_url = f"https://www.bing.com/search?q={term.replace(' ', '+')}+{loc.replace(' ', '+')}+site:.ca"
     results = []
     if not use_bing:
         return results
+    search_url = f"https://www.bing.com/search?q={term.replace(' ', '+')}+{loc.replace(' ', '+')}+site:.ca"
     try:
         resp = requests.get(search_url, headers=headers, timeout=10)
         soup = BeautifulSoup(resp.text, "html.parser")
@@ -109,18 +83,10 @@ def fetch_bing_scrape(term, loc, limit):
 def aggregate_listings(term, loc, total):
     combined = []
     seen = set()
-    # Yelp API
+    # Yelp API\
+
     if yelp_api_key:
         for item in fetch_yelp_api(term, loc, total):
-            url = item['Listing URL']
-            if url and url not in seen:
-                seen.add(url)
-                combined.append(item)
-            if len(combined) >= total:
-                return combined
-    # Google Places API
-    if google_api_key:
-        for item in fetch_google_api(term, loc, total):
             url = item['Listing URL']
             if url and url not in seen:
                 seen.add(url)
@@ -147,7 +113,7 @@ def aggregate_listings(term, loc, total):
 
 if run:
     if term and loc:
-        with st.spinner("Gathering listings using APIs and scrapers..."):
+        with st.spinner("Gathering listings using Yelp, YellowPages, and Bing..."):
             data = aggregate_listings(term, loc, count)
             if data:
                 df = pd.DataFrame(data)
@@ -157,6 +123,6 @@ if run:
                 st.download_button("📥 Download CSV", csv,
                     file_name="business_listings.csv", mime="text/csv")
             else:
-                st.warning("No listings found. Check your API keys and inputs.")
+                st.warning("No listings found. Check inputs and retry.")
     else:
         st.warning("Please enter both a business type and a location.")
