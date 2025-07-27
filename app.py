@@ -6,7 +6,6 @@ import pandas as pd
 from urllib.parse import urlparse, urljoin
 from time import sleep
 import random
-import tldextract
 
 st.set_page_config(page_title="Smart Canadian Business Scraper", layout="wide")
 
@@ -25,8 +24,8 @@ headers = {
                   "(KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
 }
 
-EMAIL_REGEX = r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}"
-PHONE_REGEX = r"(\\(?\\d{3}\\)?[\\s.-]?\\d{3}[\\s.-]?\\d{4})"
+EMAIL_REGEX = r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
+PHONE_REGEX = r"(\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4})"
 FREE_EMAIL_DOMAINS = ['gmail.com', 'yahoo.com', 'hotmail.com', 'aol.com', 'outlook.com']
 
 @st.cache_data(show_spinner=False)
