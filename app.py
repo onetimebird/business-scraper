@@ -134,6 +134,7 @@ def aggregate_listings(term, loc, total):
 
 @st.cache_data(show_spinner=False)
 def aggregate_canada_wide(term, total):
+    """Use only Yelp API for Canada-wide searches for speed."""
     major_cities = [
         "Toronto ON", "Montreal QC", "Vancouver BC",
         "Calgary AB", "Edmonton AB", "Ottawa ON",
@@ -143,8 +144,9 @@ def aggregate_canada_wide(term, total):
     combined = []
     seen = set()
     for city in major_cities:
-        city_items = aggregate_listings(term, city, total)
-        for item in city_items:
+        # Fetch only from Yelp API to keep it fast
+        yelp_list = fetch_yelp_api(term, city, total)
+        for item in yelp_list:
             url = item['Listing URL']
             if url and url not in seen:
                 seen.add(url)
