@@ -16,7 +16,11 @@ st.markdown(
 )
 
 # Configuration: hardcode your Yelp API Key here
-YELP_API_KEY = "EK7jnBCHOO8VFmt7XhNZkCI4SUT6Iwt41rDrr0gYpQZdLBSImqvpAsDew879R7FThsuLxd7GW1SPWiBmHuUYT1H-EK1JVmm0k1ebMOMUjyL-jGTUQ8QXPQ6nXnqGaHYx"
+yelp_api_key = "EK7jnBCHOO8VFmt7XhNZkCI4SUT6Iwt41rDrr0gYpQZdLBSImqvpAsDew879R7FThsuLxd7GW1SPWiBmHuUYT1H-EK1JVmm0k1ebMOMUjyL-jGTUQ8QXPQ6nXnqGaHYx"
+
+# Helper to sanitize location strings for URL
+def sanitize_loc(loc):
+    return loc.replace(',', '').replace('&', '').replace(' ', '+')
 
 # User inputs
 term = st.text_input("Business type or keywords (e.g. dentist, marketing agency)")
@@ -40,8 +44,8 @@ headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 def fetch_yelp_api(term, loc, limit):
     listings = []
     try:
-        yelp = YelpAPI(YELP_API_KEY)
-        response = yelp.search_query(term=term, location=loc, limit=min(limit, 50))
+        yelp = YelpAPI(yelp_api_key)
+        response = yelp.search_query(term=term, location=loc, limit=min(limit,50))
         for biz in response.get('businesses', []):
             name = biz.get('name', '')
             url = biz.get('url', '')
@@ -54,7 +58,8 @@ def fetch_yelp_api(term, loc, limit):
 @st.cache_data(show_spinner=False)
 def fetch_yellowpages(term, loc, limit):
     base = "https://www.yellowpages.ca"
-    search_url = f"{base}/search/si/1/{term.replace(' ', '+')}/{loc.replace(' ', '+')}"
+    loc_param = sanitize_loc(loc)
+    search_url = f"{base}/search/si/1/{term.replace(' ', '+')}/{loc_param}"
     results = []
     try:
         resp = requests.get(search_url, headers=headers, timeout=10)
@@ -65,8 +70,8 @@ def fetch_yellowpages(term, loc, limit):
             url = urljoin(base, tag['href'])
             results.append({"Business Name": name, "Listing URL": url})
             sleep(random.uniform(0.2, 0.5))
-    except:
-        pass
+    except Exception as e:
+        st.error(f"YellowPages scraping error: {e}")
     return results
 
 @st.cache_data(show_spinner=False)
@@ -74,7 +79,8 @@ def fetch_bing_scrape(term, loc, limit):
     results = []
     if not use_bing:
         return results
-    search_url = f"https://www.bing.com/search?q={term.replace(' ', '+')}+{loc.replace(' ', '+')}+site:.ca"
+    loc_param = sanitize_loc(loc)
+    search_url = f"https://www.bing.com/search?q={term.replace(' ', '+')}+{loc_param}+site:.ca"
     try:
         resp = requests.get(search_url, headers=headers, timeout=10)
         soup = BeautifulSoup(resp.text, "html.parser")
@@ -86,8 +92,8 @@ def fetch_bing_scrape(term, loc, limit):
                 name = a.get_text(strip=True)
                 results.append({"Business Name": name, "Listing URL": a['href']})
                 sleep(random.uniform(0.2, 0.5))
-    except:
-        pass
+    except Exception as e:
+        st.error(f"Bing scraping error: {e}")
     return results
 
 @st.cache_data(show_spinner=False)
@@ -96,7 +102,8 @@ def aggregate_listings(term, loc, total):
     seen = set()
     # Yelp API
     if loc:
-        for item in fetch_yelp_api(term, loc, total):
+        yelp_list = fetch_yelp_api(term, loc, total)
+        for item in yelp_list:
             url = item['Listing URL']
             if url and url not in seen:
                 seen.add(url)
@@ -105,7 +112,8 @@ def aggregate_listings(term, loc, total):
                 return combined
     # YellowPages fallback
     if loc:
-        for item in fetch_yellowpages(term, loc, total * 2):
+        yp_list = fetch_yellowpages(term, loc, total * 2)
+        for item in yp_list:
             url = item['Listing URL']
             if url and url not in seen:
                 seen.add(url)
@@ -114,7 +122,8 @@ def aggregate_listings(term, loc, total):
                 return combined
     # Bing fallback
     if loc:
-        for item in fetch_bing_scrape(term, loc, total * 2):
+        bing_list = fetch_bing_scrape(term, loc, total * 2)
+        for item in bing_list:
             url = item['Listing URL']
             if url and url not in seen:
                 seen.add(url)
@@ -126,21 +135,23 @@ def aggregate_listings(term, loc, total):
 @st.cache_data(show_spinner=False)
 def aggregate_canada_wide(term, total):
     major_cities = [
-        "Toronto, ON", "Montreal, QC", "Vancouver, BC",
-        "Calgary, AB", "Edmonton, AB", "Ottawa, ON",
-        "Winnipeg, MB", "Quebec City, QC", "Hamilton, ON",
-        "Victoria, BC"
+        "Toronto ON", "Montreal QC", "Vancouver BC",
+        "Calgary AB", "Edmonton AB", "Ottawa ON",
+        "Winnipeg MB", "Quebec City QC", "Hamilton ON",
+        "Victoria BC"
     ]
     combined = []
     seen = set()
     for city in major_cities:
-        for item in aggregate_listings(term, city, total):
+        city_items = aggregate_listings(term, city, total)
+        for item in city_items:
             url = item['Listing URL']
-            if url not in seen:
+            if url and url not in seen:
                 seen.add(url)
                 combined.append(item)
     return combined
 
+# Run on button click
 if run:
     if not term or (not canada_wide and not loc):
         st.warning("Please enter both a business type and a location (or select Canada-wide).")
