@@ -10,7 +10,7 @@ import random
 st.set_page_config(page_title="Smart Canadian Business Scraper", layout="wide")
 
 st.title("🇨🇦 Smart Canadian Business Scraper")
-st.markdown("Find and extract emails + contact info from Canadian business websites, using Yelp-powered smart crawling and filters.")
+st.markdown("Find and extract emails + contact info from Canadian business websites, using YellowPages-powered crawling and filters.")
 
 query = st.text_input("Business type or keywords (e.g. marketing agency, electrician)")
 location = st.text_input("City or province (e.g. Toronto, Alberta)")
@@ -31,94 +31,63 @@ FREE_EMAIL_DOMAINS = ['gmail.com', 'yahoo.com', 'hotmail.com', 'aol.com', 'outlo
 @st.cache_data(show_spinner=False)
 def get_search_results(query, location, limit):
     """
-    Use Yelp to find business pages and extract their official website URL.
-    Returns a list of business website URLs.
+    Use YellowPages to find business listing pages.
+    Returns a list of YellowPages business URLs.
     """
     results = []
-    base_url = "https://www.yelp.ca"
-    # Construct Yelp search URL
-    search_url = f"{base_url}/search?find_desc={query.replace(' ', '+')}&find_loc={location.replace(' ', '+')}"
+    base_url = "https://www.yellowpages.ca"
+    search_url = f"{base_url}/search/si/1/{query.replace(' ', '+')}/{location.replace(' ', '+')}"
     try:
         resp = requests.get(search_url, headers=headers, timeout=10)
         soup = BeautifulSoup(resp.text, "html.parser")
-        # Find business listing links
-        biz_links = []
-        for a in soup.find_all('a', href=True):
-            href = a['href']
-            # Business pages start with /biz/
-            if href.startswith('/biz/'):
-                biz_links.append(urljoin(base_url, href.split('?')[0]))
-        # Deduplicate
-        biz_links = list(dict.fromkeys(biz_links))
-
-        # Visit each business page and extract external website link
-        for biz_page in biz_links:
+        # Find listing links
+        for a in soup.find_all('a', class_='listing__name--link', href=True):
             if len(results) >= limit:
                 break
-            try:
-                biz_resp = requests.get(biz_page, headers=headers, timeout=10)
-                biz_soup = BeautifulSoup(biz_resp.text, "html.parser")
-                external_links = []
-                for tag in biz_soup.find_all('a', href=True):
-                    link = tag['href']
-                    # Only absolute links
-                    if link.startswith('http') and 'yelp.ca' not in link:
-                        external_links.append(link.split('?')[0])
-                # Filter out common non-business domains
-                filtered = []
-                for l in external_links:
-                    domain = urlparse(l).netloc.lower()
-                    if any(skip in domain for skip in ['google.com','facebook.com','instagram.com','twitter.com','youtube.com','maps.']):
-                        continue
-                    filtered.append(l)
-                # If we have a valid business website, add it
-                if filtered:
-                    results.append(filtered[0])
-            except:
-                continue
-    except:
+            href = a['href']
+            full_url = urljoin(base_url, href)
+            results.append(full_url)
+    except Exception:
         pass
-    return results
+    return list(dict.fromkeys(results))
+
 
 def get_contact_pages(soup, base_url):
+    """Find and return contact/about pages from a site soup"""
     contact_links = []
     for link in soup.find_all('a', href=True):
         href = link['href'].lower()
         if any(x in href for x in ["contact", "about", "team", "staff"]):
-            full_url = urljoin(base_url, href)
-            contact_links.append(full_url)
+            full = urljoin(base_url, href)
+            contact_links.append(full)
     return list(set(contact_links))
 
+
 def extract_info_from_site(url):
+    """Extract emails and phones from homepage and contact subpages"""
     try:
         resp = requests.get(url, headers=headers, timeout=5)
         soup = BeautifulSoup(resp.text, "html.parser")
-        base_url = urlparse(url).scheme + "://" + urlparse(url).netloc
-        all_pages = [url] + get_contact_pages(soup, base_url)
+        base = urlparse(url).scheme + "://" + urlparse(url).netloc
+        pages = [url] + get_contact_pages(soup, base)
 
         emails, phones = set(), set()
-        for page in all_pages:
+        for p in pages:
             try:
-                r = requests.get(page, headers=headers, timeout=5)
-                s = BeautifulSoup(r.text, "html.parser")
-                text = s.get_text()
-                new_emails = re.findall(EMAIL_REGEX, text)
-                new_phones = re.findall(PHONE_REGEX, text)
-                for e in new_emails:
-                    if not e.endswith(('.png', '.jpg', '.css', '.svg')):
-                        emails.add(e)
-                for p in new_phones:
-                    phones.add(p)
+                r = requests.get(p, headers=headers, timeout=5)
+                txt = BeautifulSoup(r.text, "html.parser").get_text()
+                emails.update(re.findall(EMAIL_REGEX, txt))
+                phones.update(re.findall(PHONE_REGEX, txt))
             except:
                 continue
-
-        emails = [e for e in emails if '@' in e and '.' in e.split('@')[-1]]
+        # Clean and filter emails
+        emails = [e for e in emails if '@' in e]
         if filter_business_emails:
             emails = [e for e in emails if e.split('@')[-1].lower() not in FREE_EMAIL_DOMAINS]
 
-        title = soup.title.string if soup.title else urlparse(url).netloc
+        title = soup.title.string.strip() if soup.title else urlparse(url).netloc
         return {
-            "Business Name": title.strip(),
+            "Business Name": title,
             "Website": url,
             "Email(s)": ", ".join(sorted(emails)),
             "Phone(s)": ", ".join(sorted(phones))
@@ -127,17 +96,15 @@ def extract_info_from_site(url):
         return None
 
 if run_scrape and query and location:
-    with st.spinner("Crawling Yelp listings, then websites — please wait..."):
-        urls = get_search_results(query, location, num_sites)
+    with st.spinner("Crawling YellowPages listings, then websites — please wait..."):
+        biz_urls = get_search_results(query, location, num_sites)
         results = []
-        for i, site in enumerate(urls):
+        for site in biz_urls:
             st.text(f"Scanning: {site}")
             info = extract_info_from_site(site)
-            if info:
-                if require_email and not info['Email(s)']:
-                    continue
+            if info and (not require_email or info['Email(s)']):
                 results.append(info)
-            sleep(random.uniform(1.2, 2.5))
+            sleep(random.uniform(1, 2))
 
         if results:
             df = pd.DataFrame(results)
@@ -147,6 +114,5 @@ if run_scrape and query and location:
             st.download_button("📥 Download CSV", csv, "business_contacts.csv", "text/csv")
         else:
             st.warning("No contact info found for the given search.")
-
 elif run_scrape:
     st.warning("Please enter both a business type and a location to begin.")
