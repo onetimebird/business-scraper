@@ -1,4 +1,6 @@
 streamlit
-beautifulsoup4
-requests
 pandas
+requests
+googlemaps
+yelpapi
+beautifulsoup4
