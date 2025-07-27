@@ -17,7 +17,7 @@ st.markdown(
 )
 
 # User inputs
-derm = st.text_input("Business type or keywords (e.g. dentist, marketing agency)")
+term = st.text_input("Business type or keywords (e.g. dentist, marketing agency)")
 loc = st.text_input("City or province (e.g. Toronto, Alberta)")
 count = st.slider("Number of businesses to list", min_value=10, max_value=500, value=100)
 yelp_api_key = st.text_input("Yelp API Key", type="password")
@@ -47,11 +47,15 @@ def fetch_google_api(term, loc, limit):
     listings = []
     try:
         gmaps = googlemaps.Client(key=google_api_key)
-        # Geocode location\        geocode_result = gmaps.geocode(loc)
+        # Geocode the location
+        geocode_result = gmaps.geocode(loc)
         if geocode_result:
             coords = geocode_result[0]['geometry']['location']
-            places = gmaps.places_nearby(location=(coords['lat'], coords['lng']),
-                                         keyword=term, rank_by='distance')
+            places = gmaps.places_nearby(
+                location=(coords['lat'], coords['lng']),
+                keyword=term,
+                rank_by='distance'
+            )
             for place in places.get('results', [])[:limit]:
                 name = place.get('name')
                 pid = place.get('place_id')
