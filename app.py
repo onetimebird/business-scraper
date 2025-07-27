@@ -21,7 +21,8 @@ location = st.text_input("City or province (e.g. Toronto, Alberta)")
 num_listings = st.slider("Number of businesses to list", min_value=10, max_value=500, value=100)
 run_scrape = st.button("🚀 Get Aggregated Listings")
 
-# HTTP headers\headers = {
+# HTTP headers
+headers = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -56,7 +57,6 @@ def fetch_yelp(query, location, limit):
     try:
         res = requests.get(search_url, headers=headers, timeout=10)
         soup = BeautifulSoup(res.text, "html.parser")
-        # collect unique biz paths
         biz_paths = set()
         for a in soup.find_all("a", href=True):
             href = a['href']
@@ -64,8 +64,6 @@ def fetch_yelp(query, location, limit):
                 biz_paths.add(href.split('?')[0])
         for path in list(biz_paths)[:limit]:
             url = urljoin(base, path)
-            # fetch business page to get name
-            name = None
             try:
                 page = requests.get(url, headers=headers, timeout=5)
                 page_soup = BeautifulSoup(page.text, "html.parser")
@@ -86,7 +84,6 @@ def fetch_bing(query, location, limit):
     try:
         res = requests.get(search_url, headers=headers, timeout=10)
         soup = BeautifulSoup(res.text, "html.parser")
-        # Bing results in <h2><a href="..."></a></h2>
         for h2 in soup.find_all("h2"):
             if len(listings) >= limit:
                 break
@@ -105,9 +102,11 @@ def fetch_bing(query, location, limit):
 def aggregate_listings(query, location, limit):
     combined = []
     seen = set()
-    sources = [fetch_yellowpages(query, location, limit*2),
-               fetch_yelp(query, location, limit*2),
-               fetch_bing(query, location, limit*2)]
+    sources = [
+        fetch_yellowpages(query, location, limit*2),
+        fetch_yelp(query, location, limit*2),
+        fetch_bing(query, location, limit*2),
+    ]
     for source in sources:
         for item in source:
             url = item["Listing URL"]
@@ -118,7 +117,6 @@ def aggregate_listings(query, location, limit):
                 return combined
     return combined
 
-# Run aggregation when button clicked
 if run_scrape:
     if query and location:
         with st.spinner("Aggregating listings from YellowPages, Yelp, and Bing..."):
@@ -127,7 +125,7 @@ if run_scrape:
                 df = pd.DataFrame(data)
                 st.success(f"✅ Retrieved {len(df)} unique listings!")
                 st.dataframe(df, use_container_width=True)
-                csv = df.to_csv(index=False).encode('utf-8')
+                csv = df.to_csv(index=False).encode("utf-8")
                 st.download_button(
                     "📥 Download CSV", csv,
                     file_name="aggregated_listings.csv",
