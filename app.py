@@ -41,7 +41,8 @@ run = st.button("🚀 Generate Listings")
 headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
 def fetch_yelp_detailed(term, loc, limit):
-    """Fetch from Yelp API and extract the actual business website via scraping external links"""
+    """Fetch from Yelp API and extract the actual business website via JSON-LD or external link scraping"""
+    import json
     listings = []
     try:
         yelp = YelpAPI(yelp_api_key)
@@ -50,21 +51,36 @@ def fetch_yelp_detailed(term, loc, limit):
             name = biz.get('name', '')
             yelp_url = biz.get('url', '')
             website_url = ''
-            # Scrape Yelp page for external website link
+            # Fetch Yelp page
             try:
                 r = requests.get(yelp_url, headers=headers, timeout=5)
                 s = BeautifulSoup(r.text, 'html.parser')
-                ext_links = []
-                for a in s.find_all('a', href=True):
-                    href = a['href']
-                    if href.startswith('http') and 'yelp.com' not in href:
-                        domain = urlparse(href).netloc.lower()
-                        if not any(skip in domain for skip in [
-                            'facebook.com', 'instagram.com', 'twitter.com', 'google.com', 'booking.com'
-                        ]):
-                            ext_links.append(href.split('?')[0])
-                if ext_links:
-                    website_url = ext_links[0]
+                # Try JSON-LD first
+                for script in s.find_all('script', type='application/ld+json'):
+                    try:
+                        data = json.loads(script.string)
+                        entries = [data] if isinstance(data, dict) else data
+                        for entry in entries:
+                            if entry.get('@type') in ['LocalBusiness', 'Organization'] and entry.get('url'):
+                                website_url = entry.get('url')
+                                break
+                        if website_url:
+                            break
+                    except:
+                        continue
+                # Fallback to external link scraping
+                if not website_url:
+                    ext_links = []
+                    for a in s.find_all('a', href=True):
+                        href = a['href']
+                        if href.startswith('http') and 'yelp.com' not in href:
+                            domain = urlparse(href).netloc.lower()
+                            if not any(skip in domain for skip in [
+                                'facebook.com', 'instagram.com', 'twitter.com', 'google.com', 'booking.com'
+                            ]):
+                                ext_links.append(href.split('?')[0])
+                    if ext_links:
+                        website_url = ext_links[0]
             except:
                 pass
             listings.append({
