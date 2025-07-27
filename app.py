@@ -12,14 +12,16 @@ st.set_page_config(page_title="Canadian Business Listing Aggregator", layout="wi
 
 st.title("🇨🇦 Comprehensive Business Listing Aggregator")
 st.markdown(
-    "Aggregate Canadian business listings using the Yelp API, YellowPages, and Bing for a de-duplicated list without requiring Google API keys."
+    "Aggregate Canadian business listings using the Yelp API, YellowPages, and Bing for a de-duplicated list without requiring manual API key input each search."
 )
+
+# Configuration: hardcode your Yelp API Key here
+yelp_api_key = "EK7jnBCHOO8VFmt7XhNZkCI4SUT6Iwt41rDrr0gYpQZdLBSImqvpAsDew879R7FThsuLxd7GW1SPWiBmHuUYT1H-EK1JVmm0k1ebMOMUjyL-jGTUQ8QXPQ6nXnqGaHYx"
 
 # User inputs
 term = st.text_input("Business type or keywords (e.g. dentist, marketing agency)")
 loc = st.text_input("City or province (e.g. Toronto, Alberta)")
 count = st.slider("Number of businesses to list", min_value=10, max_value=500, value=100)
-yelp_api_key = st.text_input("Yelp API Key", type="password")
 use_bing = st.checkbox("Include Bing scraping fallback", value=True)
 run = st.button("🚀 Generate Listings")
 
@@ -83,16 +85,14 @@ def fetch_bing_scrape(term, loc, limit):
 def aggregate_listings(term, loc, total):
     combined = []
     seen = set()
-    # Yelp API\
-
-    if yelp_api_key:
-        for item in fetch_yelp_api(term, loc, total):
-            url = item['Listing URL']
-            if url and url not in seen:
-                seen.add(url)
-                combined.append(item)
-            if len(combined) >= total:
-                return combined
+    # Yelp API
+    for item in fetch_yelp_api(term, loc, total):
+        url = item['Listing URL']
+        if url and url not in seen:
+            seen.add(url)
+            combined.append(item)
+        if len(combined) >= total:
+            return combined
     # YellowPages fallback
     for item in fetch_yellowpages(term, loc, total*2):
         url = item['Listing URL']
