@@ -12,16 +12,25 @@ st.set_page_config(page_title="Canadian Business Listing Aggregator", layout="wi
 
 st.title("🇨🇦 Comprehensive Business Listing Aggregator")
 st.markdown(
-    "Aggregate Canadian business listings using the Yelp API, YellowPages, and Bing for a de-duplicated list without requiring manual API key input each search."
+    "Aggregate Canadian business listings using the Yelp API, YellowPages, and Bing for a de-duplicated list."
 )
 
 # Configuration: hardcode your Yelp API Key here
-yelp_api_key = "EK7jnBCHOO8VFmt7XhNZkCI4SUT6Iwt41rDrr0gYpQZdLBSImqvpAsDew879R7FThsuLxd7GW1SPWiBmHuUYT1H-EK1JVmm0k1ebMOMUjyL-jGTUQ8QXPQ6nXnqGaHYx"
+YELP_API_KEY = "EK7jnBCHOO8VFmt7XhNZkCI4SUT6Iwt41rDrr0gYpQZdLBSImqvpAsDew879R7FThsuLxd7GW1SPWiBmHuUYT1H-EK1JVmm0k1ebMOMUjyL-jGTUQ8QXPQ6nXnqGaHYx"
 
 # User inputs
 term = st.text_input("Business type or keywords (e.g. dentist, marketing agency)")
-loc = st.text_input("City or province (e.g. Toronto, Alberta)")
-count = st.slider("Number of businesses to list", min_value=10, max_value=500, value=100)
+canada_wide = st.checkbox("Canada-wide search (include major cities)", value=False)
+if not canada_wide:
+    loc = st.text_input("City or province (e.g. Toronto, Alberta)")
+else:
+    loc = None
+
+count_label = (
+    "Number of businesses to list per city" if canada_wide 
+    else "Number of businesses to list"
+)
+count = st.slider(count_label, min_value=10, max_value=500, value=100)
 use_bing = st.checkbox("Include Bing scraping fallback", value=True)
 run = st.button("🚀 Generate Listings")
 
@@ -31,8 +40,8 @@ headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 def fetch_yelp_api(term, loc, limit):
     listings = []
     try:
-        yelp = YelpAPI(yelp_api_key)
-        response = yelp.search_query(term=term, location=loc, limit=min(limit,50))
+        yelp = YelpAPI(YELP_API_KEY)
+        response = yelp.search_query(term=term, location=loc, limit=min(limit, 50))
         for biz in response.get('businesses', []):
             name = biz.get('name', '')
             url = biz.get('url', '')
@@ -86,43 +95,70 @@ def aggregate_listings(term, loc, total):
     combined = []
     seen = set()
     # Yelp API
-    for item in fetch_yelp_api(term, loc, total):
-        url = item['Listing URL']
-        if url and url not in seen:
-            seen.add(url)
-            combined.append(item)
-        if len(combined) >= total:
-            return combined
+    if loc:
+        for item in fetch_yelp_api(term, loc, total):
+            url = item['Listing URL']
+            if url and url not in seen:
+                seen.add(url)
+                combined.append(item)
+            if len(combined) >= total:
+                return combined
     # YellowPages fallback
-    for item in fetch_yellowpages(term, loc, total*2):
-        url = item['Listing URL']
-        if url and url not in seen:
-            seen.add(url)
-            combined.append(item)
-        if len(combined) >= total:
-            return combined
+    if loc:
+        for item in fetch_yellowpages(term, loc, total * 2):
+            url = item['Listing URL']
+            if url and url not in seen:
+                seen.add(url)
+                combined.append(item)
+            if len(combined) >= total:
+                return combined
     # Bing fallback
-    for item in fetch_bing_scrape(term, loc, total*2):
-        url = item['Listing URL']
-        if url and url not in seen:
-            seen.add(url)
-            combined.append(item)
-        if len(combined) >= total:
-            return combined
+    if loc:
+        for item in fetch_bing_scrape(term, loc, total * 2):
+            url = item['Listing URL']
+            if url and url not in seen:
+                seen.add(url)
+                combined.append(item)
+            if len(combined) >= total:
+                return combined
+    return combined
+
+@st.cache_data(show_spinner=False)
+def aggregate_canada_wide(term, total):
+    major_cities = [
+        "Toronto, ON", "Montreal, QC", "Vancouver, BC",
+        "Calgary, AB", "Edmonton, AB", "Ottawa, ON",
+        "Winnipeg, MB", "Quebec City, QC", "Hamilton, ON",
+        "Victoria, BC"
+    ]
+    combined = []
+    seen = set()
+    for city in major_cities:
+        for item in aggregate_listings(term, city, total):
+            url = item['Listing URL']
+            if url not in seen:
+                seen.add(url)
+                combined.append(item)
     return combined
 
 if run:
-    if term and loc:
-        with st.spinner("Gathering listings using Yelp, YellowPages, and Bing..."):
-            data = aggregate_listings(term, loc, count)
+    if not term or (not canada_wide and not loc):
+        st.warning("Please enter both a business type and a location (or select Canada-wide).")
+    else:
+        with st.spinner("Gathering listings..."):
+            if canada_wide:
+                data = aggregate_canada_wide(term, count)
+            else:
+                data = aggregate_listings(term, loc, count)
             if data:
                 df = pd.DataFrame(data)
                 st.success(f"✅ Retrieved {len(df)} unique listings!")
                 st.dataframe(df, use_container_width=True)
                 csv = df.to_csv(index=False).encode('utf-8')
-                st.download_button("📥 Download CSV", csv,
-                    file_name="business_listings.csv", mime="text/csv")
+                st.download_button(
+                    "📥 Download CSV", csv,
+                    file_name="business_listings.csv",
+                    mime="text/csv"
+                )
             else:
                 st.warning("No listings found. Check inputs and retry.")
-    else:
-        st.warning("Please enter both a business type and a location.")
