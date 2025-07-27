@@ -27,7 +27,7 @@ headers = {
 EMAIL_REGEX = r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
 PHONE_REGEX = r"(\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4})"
 FREE_EMAIL_DOMAINS = ['gmail.com', 'yahoo.com', 'hotmail.com', 'aol.com', 'outlook.com']
-SKIP_DOMAINS = ['yellowpages.ca', 'google.com', 'maps.google.com', 'facebook.com', 'twitter.com', 'instagram.com', 'linkedin.com', 'youtube.com']
+SKIP_DOMAINS = ['yellowpages.ca', 'pagesjaunes.ca', 'yp.ca', 'google.com', 'maps.google.com', 'facebook.com', 'twitter.com', 'instagram.com', 'linkedin.com', 'youtube.com']
 
 @st.cache_data(show_spinner=False)
 def get_search_results(query, location, limit):
