@@ -2,11 +2,10 @@ import streamlit as st
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 from time import sleep
 import random
 from yelpapi import YelpAPI
-import re
 
 # Streamlit app configuration
 st.set_page_config(page_title="Canadian Business Listing Aggregator", layout="wide")
@@ -41,24 +40,31 @@ run = st.button("🚀 Generate Listings")
 
 headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
-@st.cache_data(show_spinner=False)
 def fetch_yelp_detailed(term, loc, limit):
-    """Fetch from Yelp API and scrape the Yelp page for the business website."""
+    """Fetch from Yelp API and extract the actual business website via scraping external links"""
     listings = []
     try:
         yelp = YelpAPI(yelp_api_key)
-        response = yelp.search_query(term=term, location=loc, limit=min(limit,50))
+        response = yelp.search_query(term=term, location=loc, limit=min(limit, 50))
         for biz in response.get('businesses', []):
             name = biz.get('name', '')
             yelp_url = biz.get('url', '')
             website_url = ''
-            # Scrape Yelp page for actual website link
+            # Scrape Yelp page for external website link
             try:
                 r = requests.get(yelp_url, headers=headers, timeout=5)
                 s = BeautifulSoup(r.text, 'html.parser')
-                link = s.find('a', href=True, string=re.compile('website', re.I))
-                if link:
-                    website_url = link['href']
+                ext_links = []
+                for a in s.find_all('a', href=True):
+                    href = a['href']
+                    if href.startswith('http') and 'yelp.com' not in href:
+                        domain = urlparse(href).netloc.lower()
+                        if not any(skip in domain for skip in [
+                            'facebook.com', 'instagram.com', 'twitter.com', 'google.com', 'booking.com'
+                        ]):
+                            ext_links.append(href.split('?')[0])
+                if ext_links:
+                    website_url = ext_links[0]
             except:
                 pass
             listings.append({
@@ -77,11 +83,11 @@ def fetch_yelp_basic(term, loc, limit):
     listings = []
     try:
         yelp = YelpAPI(yelp_api_key)
-        response = yelp.search_query(term=term, location=loc, limit=min(limit,50))
+        response = yelp.search_query(term=term, location=loc, limit=min(limit, 50))
         for biz in response.get('businesses', []):
             listings.append({
-                "Business Name": biz.get('name',''),
-                "Yelp URL": biz.get('url',''),
+                "Business Name": biz.get('name', ''),
+                "Yelp URL": biz.get('url', ''),
                 "Business Website": ''
             })
     except Exception as e:
@@ -149,50 +155,48 @@ def fetch_bing_scrape(term, loc, limit):
 
 @st.cache_data(show_spinner=False)
 def aggregate_listings(term, loc, total, detailed=False):
-    combined=[]
-    seen=set()
+    combined = []
+    seen = set()
     # Yelp
-    if detailed:
-        yelp_list = fetch_yelp_detailed(term, loc, total)
-    else:
-        yelp_list = fetch_yelp_basic(term, loc, total)
+    yelp_list = fetch_yelp_detailed(term, loc, total) if detailed else fetch_yelp_basic(term, loc, total)
     for item in yelp_list:
         url = item['Business Website'] or item['Yelp URL']
         if url and url not in seen:
             seen.add(url)
             combined.append(item)
-        if len(combined)>=total:
+        if len(combined) >= total:
             return combined
-    # YellowPages
+    # YellowPages fallback
     for item in fetch_yellowpages(term, loc, total*2):
-        url=item['Business Website'] or item['Listing URL']
+        url = item['Business Website'] or item['Listing URL']
         if url and url not in seen:
             seen.add(url)
             combined.append(item)
-        if len(combined)>=total:
+        if len(combined) >= total:
             return combined
-    # Bing
+    # Bing fallback
     for item in fetch_bing_scrape(term, loc, total*2):
-        url=item['Business Website']
+        url = item['Business Website']
         if url and url not in seen:
             seen.add(url)
             combined.append(item)
-        if len(combined)>=total:
+        if len(combined) >= total:
             return combined
     return combined
 
 @st.cache_data(show_spinner=False)
 def aggregate_canada_wide(term, total):
-    cities=["Toronto ON","Montreal QC","Vancouver BC","Calgary AB","Edmonton AB",
-            "Ottawa ON","Winnipeg MB","Quebec City QC","Hamilton ON","Victoria BC"]
-    combined=[];seen=set()
+    cities = ["Toronto ON","Montreal QC","Vancouver BC","Calgary AB","Edmonton AB",
+              "Ottawa ON","Winnipeg MB","Quebec City QC","Hamilton ON","Victoria BC"]
+    combined = []
+    seen = set()
     for city in cities:
-        # fast basic fetch for speed
-        items=fetch_yelp_basic(term, city, total)
+        items = fetch_yelp_basic(term, city, total)
         for item in items:
-            url=item['Yelp URL']
+            url = item['Yelp URL']
             if url and url not in seen:
-                seen.add(url);combined.append(item)
+                seen.add(url)
+                combined.append(item)
     return combined
 
 # Run on button click
@@ -200,19 +204,17 @@ if run:
     if not term or (not canada_wide and not loc):
         st.warning("Please enter both a business type and a location (or select Canada-wide).")
     else:
-        with st.spinner("Gathering listings..."):
+        with st.spinner("Gathering listings with website URLs..."):
             if canada_wide:
-                data=aggregate_canada_wide(term, count)
+                data = aggregate_canada_wide(term, count)
             else:
-                # detailed scrape only for single-location for website URLs
-                data=aggregate_listings(term, loc, count, detailed=True)
+                data = aggregate_listings(term, loc, count, detailed=True)
             if data:
-                df=pd.DataFrame(data)
+                df = pd.DataFrame(data)
                 st.success(f"✅ Retrieved {len(df)} unique listings!")
-                st.dataframe(df,use_container_width=True)
-                csv=df.to_csv(index=False).encode('utf-8')
-                st.download_button("📥 Download CSV",csv,
-                                   file_name="business_listings.csv",
-                                   mime="text/csv")
+                st.dataframe(df, use_container_width=True)
+                csv = df.to_csv(index=False).encode('utf-8')
+                st.download_button("📥 Download CSV", csv,
+                    file_name="business_listings.csv", mime="text/csv")
             else:
                 st.warning("No listings found. Check inputs and retry.")
