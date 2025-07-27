@@ -2,7 +2,7 @@ import streamlit as st
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin
 from time import sleep
 import random
 
@@ -12,17 +12,16 @@ st.set_page_config(page_title="Canadian Business Listing Aggregator", layout="wi
 st.title("🇨🇦 Canadian Business Listing Aggregator")
 st.markdown(
     "Aggregate business listings from YellowPages, Yelp, and Bing for your search term and location, "
-    "and remove duplicates for a comprehensive CSV you can work with."
+    "with deduplication for a comprehensive list you can manually extract emails from."
 )
 
 # User inputs
 query = st.text_input("Business type or keywords (e.g. dentist, marketing agency)")
 location = st.text_input("City or province (e.g. Toronto, Alberta)")
-num_listings = st.slider("Number of businesses to list", min_value=10, max_value=300, value=50)
+num_listings = st.slider("Number of businesses to list", min_value=10, max_value=500, value=100)
 run_scrape = st.button("🚀 Get Aggregated Listings")
 
-# HTTP headers
-headers = {
+# HTTP headers\headers = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -39,9 +38,7 @@ def fetch_yellowpages(query, location, limit):
         res = requests.get(search_url, headers=headers, timeout=10)
         soup = BeautifulSoup(res.text, "html.parser")
         tags = soup.find_all("a", class_="listing__name--link", href=True)
-        for tag in tags:
-            if len(listings) >= limit:
-                break
+        for tag in tags[:limit]:
             name = tag.get_text(strip=True)
             href = tag['href']
             url = urljoin(base, href)
@@ -59,17 +56,25 @@ def fetch_yelp(query, location, limit):
     try:
         res = requests.get(search_url, headers=headers, timeout=10)
         soup = BeautifulSoup(res.text, "html.parser")
-        links = soup.find_all("a", href=True, attrs={"class": "css-1m051bw"}) or \
-                [a for a in soup.find_all("a", href=True) if a["href"].startswith("/biz/")]
-        for a in links:
-            if len(listings) >= limit:
-                break
+        # collect unique biz paths
+        biz_paths = set()
+        for a in soup.find_all("a", href=True):
             href = a['href']
-            url = urljoin(base, href.split('?')[0])
-            name = a.get_text(strip=True)
-            if name:
-                listings.append({"Business Name": name, "Listing URL": url})
-                sleep(random.uniform(0.2, 0.5))
+            if href.startswith("/biz/"):
+                biz_paths.add(href.split('?')[0])
+        for path in list(biz_paths)[:limit]:
+            url = urljoin(base, path)
+            # fetch business page to get name
+            name = None
+            try:
+                page = requests.get(url, headers=headers, timeout=5)
+                page_soup = BeautifulSoup(page.text, "html.parser")
+                h1 = page_soup.find("h1")
+                name = h1.get_text(strip=True) if h1 else url
+            except:
+                name = url
+            listings.append({"Business Name": name, "Listing URL": url})
+            sleep(random.uniform(0.3, 0.7))
     except:
         pass
     return listings
@@ -81,17 +86,17 @@ def fetch_bing(query, location, limit):
     try:
         res = requests.get(search_url, headers=headers, timeout=10)
         soup = BeautifulSoup(res.text, "html.parser")
-        items = soup.find_all("li", class_="b_algo")
-        for li in items:
+        # Bing results in <h2><a href="..."></a></h2>
+        for h2 in soup.find_all("h2"):
             if len(listings) >= limit:
                 break
-            a = li.find("a", href=True)
+            a = h2.find("a", href=True)
             if a:
                 url = a['href']
-                name = a.get_text(strip=True)
                 if ".ca" in url:
+                    name = a.get_text(strip=True)
                     listings.append({"Business Name": name, "Listing URL": url})
-                    sleep(random.uniform(0.2, 0.5))
+                    sleep(random.uniform(0.2, 0.6))
     except:
         pass
     return listings
@@ -100,7 +105,6 @@ def fetch_bing(query, location, limit):
 def aggregate_listings(query, location, limit):
     combined = []
     seen = set()
-    # fetch double limit from each source to ensure diversity
     sources = [fetch_yellowpages(query, location, limit*2),
                fetch_yelp(query, location, limit*2),
                fetch_bing(query, location, limit*2)]
