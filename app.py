@@ -30,32 +30,55 @@ FREE_EMAIL_DOMAINS = ['gmail.com', 'yahoo.com', 'hotmail.com', 'aol.com', 'outlo
 
 @st.cache_data(show_spinner=False)
 def get_search_results(query, location, limit):
+    """
+    Use Yelp to find business pages and extract their official website URL.
+    Returns a list of business website URLs.
+    """
     results = []
     base_url = "https://www.yelp.ca"
+    # Construct Yelp search URL
     search_url = f"{base_url}/search?find_desc={query.replace(' ', '+')}&find_loc={location.replace(' ', '+')}"
     try:
-        resp = requests.get(search_url, headers=headers)
+        resp = requests.get(search_url, headers=headers, timeout=10)
         soup = BeautifulSoup(resp.text, "html.parser")
-        listings = soup.find_all('a', href=True)
-        for link in listings:
-            href = link['href']
-            if href.startswith("/biz/"):
-                biz_page = urljoin(base_url, href)
-                try:
-                    biz_resp = requests.get(biz_page, headers=headers, timeout=5)
-                    biz_soup = BeautifulSoup(biz_resp.text, "html.parser")
-                    website_link = biz_soup.find("a", href=True, string=re.compile("Visit Website", re.I))
-                    if website_link:
-                        site_url = website_link['href']
-                        if site_url.startswith("http") and ".ca" in site_url:
-                            results.append(site_url)
-                            if len(results) >= limit:
-                                break
-                except:
-                    continue
+        # Find business listing links
+        biz_links = []
+        for a in soup.find_all('a', href=True):
+            href = a['href']
+            # Business pages start with /biz/
+            if href.startswith('/biz/'):
+                biz_links.append(urljoin(base_url, href.split('?')[0]))
+        # Deduplicate
+        biz_links = list(dict.fromkeys(biz_links))
+
+        # Visit each business page and extract external website link
+        for biz_page in biz_links:
+            if len(results) >= limit:
+                break
+            try:
+                biz_resp = requests.get(biz_page, headers=headers, timeout=10)
+                biz_soup = BeautifulSoup(biz_resp.text, "html.parser")
+                external_links = []
+                for tag in biz_soup.find_all('a', href=True):
+                    link = tag['href']
+                    # Only absolute links
+                    if link.startswith('http') and 'yelp.ca' not in link:
+                        external_links.append(link.split('?')[0])
+                # Filter out common non-business domains
+                filtered = []
+                for l in external_links:
+                    domain = urlparse(l).netloc.lower()
+                    if any(skip in domain for skip in ['google.com','facebook.com','instagram.com','twitter.com','youtube.com','maps.']):
+                        continue
+                    filtered.append(l)
+                # If we have a valid business website, add it
+                if filtered:
+                    results.append(filtered[0])
+            except:
+                continue
     except:
         pass
-    return list(set(results))
+    return results
 
 def get_contact_pages(soup, base_url):
     contact_links = []
