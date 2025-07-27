@@ -10,7 +10,7 @@ import random
 st.set_page_config(page_title="Smart Canadian Business Scraper", layout="wide")
 
 st.title("🇨🇦 Smart Canadian Business Scraper")
-st.markdown("Find and extract emails + contact info from Canadian business websites, with smart crawling and filters.")
+st.markdown("Find and extract emails + contact info from Canadian business websites, using Yelp-powered smart crawling and filters.")
 
 query = st.text_input("Business type or keywords (e.g. marketing agency, electrician)")
 location = st.text_input("City or province (e.g. Toronto, Alberta)")
@@ -31,20 +31,28 @@ FREE_EMAIL_DOMAINS = ['gmail.com', 'yahoo.com', 'hotmail.com', 'aol.com', 'outlo
 @st.cache_data(show_spinner=False)
 def get_search_results(query, location, limit):
     results = []
-    search_query = f"{query} {location} site:.ca"
-    url = f"https://www.bing.com/search?q={search_query.replace(' ', '+')}"
+    base_url = "https://www.yelp.ca"
+    search_url = f"{base_url}/search?find_desc={query.replace(' ', '+')}&find_loc={location.replace(' ', '+')}"
     try:
-        resp = requests.get(url, headers=headers)
+        resp = requests.get(search_url, headers=headers)
         soup = BeautifulSoup(resp.text, "html.parser")
-        for link in soup.find_all("a", href=True):
+        listings = soup.find_all('a', href=True)
+        for link in listings:
             href = link['href']
-            if href.startswith("http") and ".ca" in href:
-                domain = urlparse(href).netloc
-                if not any(d in domain for d in ["bing.com", "microsoft.com"]):
-                    clean = href.split("?")[0]
-                    results.append(clean)
-                    if len(results) >= limit:
-                        break
+            if href.startswith("/biz/"):
+                biz_page = urljoin(base_url, href)
+                try:
+                    biz_resp = requests.get(biz_page, headers=headers, timeout=5)
+                    biz_soup = BeautifulSoup(biz_resp.text, "html.parser")
+                    website_link = biz_soup.find("a", href=True, string=re.compile("Visit Website", re.I))
+                    if website_link:
+                        site_url = website_link['href']
+                        if site_url.startswith("http") and ".ca" in site_url:
+                            results.append(site_url)
+                            if len(results) >= limit:
+                                break
+                except:
+                    continue
     except:
         pass
     return list(set(results))
@@ -81,7 +89,6 @@ def extract_info_from_site(url):
             except:
                 continue
 
-        # Clean emails
         emails = [e for e in emails if '@' in e and '.' in e.split('@')[-1]]
         if filter_business_emails:
             emails = [e for e in emails if e.split('@')[-1].lower() not in FREE_EMAIL_DOMAINS]
@@ -97,7 +104,7 @@ def extract_info_from_site(url):
         return None
 
 if run_scrape and query and location:
-    with st.spinner("Crawling websites, hang tight..."):
+    with st.spinner("Crawling Yelp listings, then websites — please wait..."):
         urls = get_search_results(query, location, num_sites)
         results = []
         for i, site in enumerate(urls):
